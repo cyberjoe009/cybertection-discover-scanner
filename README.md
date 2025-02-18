@@ -1,7 +1,12 @@
 # cybertection-discover-scanner
 Similar to netdiscover but more advanced
 
-To Use:
+To Use: 
+MUST RUN IN A VERTUAL ENVIRONMENT
+
+python3 -m venv .venv        # Create
+source .venv/bin/activate   # Activate (Linux/macOS)
+.venv\Scripts\activate      # Activate (Windows)
 
 Install Libraries: pip install scapy requests python-nmap
 
