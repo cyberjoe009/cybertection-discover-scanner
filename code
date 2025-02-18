@@ -6,17 +6,39 @@ import ipaddress
 import logging
 import os
 import requests
-import asyncio  # For asynchronous scanning
-import nmap  # For Nmap integration (install: pip install python-nmap)
-from concurrent.futures import ThreadPoolExecutor  # For parallel Nmap scans
+import asyncio
+import nmap
+from concurrent.futures import ThreadPoolExecutor
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
-# ... (get_arguments function remains the same)
+def get_arguments():  # Corrected: Added the definition for get_arguments
+    parser = argparse.ArgumentParser(description="Advanced Network Discovery Tool")
+    parser.add_argument("-i", "--interface", dest="interface", help="Network interface to scan (e.g., eth0, wlan0)", required=True)
+    parser.add_argument("-r", "--range", dest="ip_range", help="IP range to scan (e.g., 192.168.1.0/24)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Increase output verbosity")
+    options = parser.parse_args()
+
+    if options.ip_range:
+        try:
+            ipaddress.ip_network(options.ip_range)
+        except ValueError:
+            parser.error("[-] Invalid IP range specified.")
+    else:
+        try:
+            iface = scapy.get_if_addr(options.interface)
+            iface_netmask = scapy.get_if_netmask(options.interface)
+            options.ip_range = str(ipaddress.IPv4Network(iface + '/' + iface_netmask, strict=False))
+            logging.info(f"Scanning the network of the interface: {options.ip_range}")
+        except Exception as e:
+            parser.error(f"[-] Could not determine network for interface: {e}")
+
+    return options
+
 
 async def async_scan(ip_range, interface, verbose=False):
     clients_list = []
-    ans, unans = await asyncio.to_thread(scapy.srp, scapy.Ether(dst="ff:ff:ff:ff:ff:ff")/scapy.ARP(pdst=ip_range), timeout=2, iface=interface, verbose=False) # Make Scapy srp async
+    ans, unans = await asyncio.to_thread(scapy.srp, scapy.Ether(dst="ff:ff:ff:ff:ff:ff")/scapy.ARP(pdst=ip_range), timeout=2, iface=interface, verbose=False)
     for sent, received in ans:
         client_dict = {"ip": received.psrc, "mac": received.hwsrc}
         clients_list.append(client_dict)
@@ -25,16 +47,15 @@ async def async_scan(ip_range, interface, verbose=False):
     return clients_list
 
 async def discover_services(ip, verbose=False):
-    nm = nmap.PortScanner()  # Initialize Nmap port scanner
+    nm = nmap.PortScanner()
     try:
-        nm.scan(ip, '1-1024', arguments='-sV -O') # Scan common ports for services and OS detection
+        nm.scan(ip, '1-1024', arguments='-sV -O')
         if nm.has_host(ip):
             for proto in nm[ip].all_protocols():
                 lport = nm[ip][proto].keys()
                 for port in lport:
                     if verbose:
                         logging.info(f"{ip}:{port}/{proto} {nm[ip][proto][port]['state']} {nm[ip][proto][port]['name']}")
-                    # You could store this information in a data structure for further use.
         else:
             if verbose:
                 logging.info(f"Host {ip} did not respond to service scan.")
@@ -43,19 +64,15 @@ async def discover_services(ip, verbose=False):
 
 async def process_client(client, verbose=False):
     await discover_services(client["ip"], verbose)
-    # OS fingerprinting (basic - Nmap does this already in discover_services)
-    # More advanced OS fingerprinting would require deeper packet analysis.
 
 async def scan_network(ip_range, interface, verbose=False):
     clients = await async_scan(ip_range, interface, verbose)
 
-    # Use ThreadPoolExecutor for parallel Nmap scans
     with ThreadPoolExecutor() as executor:
         tasks = [process_client(client, verbose) for client in clients]
         await asyncio.gather(*tasks)
 
     return clients
-
 
 def print_result(results_list):
     print("--------------------------------------------------")
@@ -66,24 +83,22 @@ def print_result(results_list):
         print(f"{client['ip']}\t\t{client['mac']}\t\t{vendor}")
     print("--------------------------------------------------")
 
-def get_mac_vendor(mac_address): # Online lookup
+def get_mac_vendor(mac_address):
     try:
         url = f"https://api.macaddress.io/v1?search={mac_address}&output=json&apiKey=<YOUR_API_KEY>"  # Replace with your API key
         response = requests.get(url)
         data = response.json()
         if data:
-            return data.get("vendor", "Unknown") # Handle potential missing vendor
+            return data.get("vendor", "Unknown")
         return "Unknown"
     except requests.exceptions.RequestException as e:
         logging.warning(f"MAC lookup failed (online): {e}")
         return "Unknown"
 
-# ... (ARP poisoning - implement with extreme caution and only on your own networks)
-# ... (GUI - would require a separate GUI library like Tkinter, PyQt, etc.)
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
         exit("[-] This script must be run with root privileges. Try: sudo python3 net_discover.py")
 
-    options = get_arguments()
-    asyncio.run(scan_network(options.ip_range, options.interface, options.verbose))  # Run async scan
+    options = get_arguments()  # Call the get_arguments function
+    asyncio.run(scan_network(options.ip_range, options.interface, options.verbose))
